@@ -1,0 +1,22 @@
+INSTINCT BLE DETECTOR - Galaxy Watch 7
+
+OBJETIVO
+Escuchar anuncios BLE cercanos y resaltar coincidencias con identificadores previamente observados del Instinct Go. Una coincidencia NO demuestra que se haya descifrado la glucosa.
+
+SEGURIDAD
+El código solo utiliza BluetoothLeScanner.startScan/stopScan. No llama a connectGatt, createBond, writeCharacteristic, ni modifica la conexión con el iPhone.
+
+COMPILACIÓN
+Se incluye .github/workflows/build-apk.yml para compilar automáticamente en GitHub Actions. También se puede abrir como proyecto Gradle en Android Studio, con SDK 35 y JDK 17.
+
+INSTALACIÓN POR ADB (después de compilar)
+adb -s IP:PUERTO install -r app-debug.apk
+
+CAPTURA DE RESULTADOS (después de escanear 90 segundos)
+adb -s IP:PUERTO logcat -d -s InstinctBLE:I > resultado_instinct.txt
+
+NOTAS
+- No confundir el nombre y MAC conocidos con una prueba de recepción: solo si aparecen como resultado de escaneo hay indicio positivo.
+- Android 12+ puede filtrar algunas señales cuando se declara neverForLocation.
+- Las direcciones BLE pueden rotar y el UUID puede no estar anunciado.
+- No usar como monitor médico ni para decisiones de insulina.
