@@ -44,12 +44,17 @@ public class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Object lock = new Object();
     private final HashSet<String> seen = new HashSet<>();
+    private final HashSet<String> savedSignatures = new HashSet<>();
+    private static final int MAX_SAVED_ADVERTISEMENTS = 1500;
     private BluetoothLeScanner scanner;
     private BufferedWriter writer;
     private File logFile;
     private boolean scanning;
     private boolean pendingUi;
     private int count;
+    private int totalAdvertisements;
+    private int savedAdvertisements;
+    private String lastOther = "Sin anuncios de otros dispositivos.";
     private String last = "Todavia no se ha recibido ningun anuncio del sensor.";
     private TextView status, results;
     private Button button;
@@ -79,7 +84,7 @@ public class MainActivity extends Activity {
         status.setGravity(Gravity.CENTER);
         status.setTextSize(15);
         status.setTextColor(0xffffffff);
-        status.setText("Instinct BLE 2.0 | Escaneo pasivo");
+        status.setText("Instinct BLE 2.1 | Diagnostico pasivo");
         root.addView(status);
         button = new Button(this);
         button.setText("ESCANEAR 90 S");
@@ -89,7 +94,7 @@ public class MainActivity extends Activity {
         results = new TextView(this);
         results.setTextSize(12);
         results.setTextColor(0xffc7e8ff);
-        results.setText("Los anuncios del sensor se guardan en un CSV local.\nNo conecta con el sensor. No mide glucosa.");
+        results.setText("Guarda hasta 1500 anuncios BLE de dispositivos cercanos en un CSV local.\nNo conecta con el sensor. No mide glucosa.");
         scroll.addView(results);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
@@ -116,7 +121,7 @@ public class MainActivity extends Activity {
         try {
             synchronized (lock) {
                 writer = new BufferedWriter(new FileWriter(logFile));
-                writer.write("timestamp_local,name,mac,rssi,uuids,raw_scan_record_hex,service_data_hex,manufacturer_data_hex\n");
+                writer.write("timestamp_local,possible_instinct,name,mac,rssi,uuids,raw_scan_record_hex,service_data_hex,manufacturer_data_hex\n");
                 writer.flush();
             }
         } catch (IOException ex) {
@@ -125,7 +130,11 @@ public class MainActivity extends Activity {
             return;
         }
         count = 0;
+        totalAdvertisements = 0;
+        savedAdvertisements = 0;
         seen.clear();
+        savedSignatures.clear();
+        lastOther = "Sin anuncios de otros dispositivos.";
         last = "Esperando anuncios del Instinct...";
         ScanSettings settings = new ScanSettings.Builder()
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -155,28 +164,45 @@ public class MainActivity extends Activity {
         if (name == null) name = "(sin nombre)";
         String uuids = record != null && record.getServiceUuids() != null
                 ? record.getServiceUuids().toString() : "[]";
+        String serviceUuids = record != null && record.getServiceData() != null
+                ? record.getServiceData().keySet().toString() : "[]";
         boolean target = MAC_TARGET.equalsIgnoreCase(mac)
                 || name.toUpperCase(Locale.ROOT).contains(NAME_PREFIX)
-                || uuids.toLowerCase(Locale.ROOT).contains(UUID_TARGET);
+                || uuids.toLowerCase(Locale.ROOT).contains(UUID_TARGET)
+                || serviceUuids.toLowerCase(Locale.ROOT).contains(UUID_TARGET);
+        String raw = record == null ? "" : hex(record.getBytes());
         synchronized (lock) {
             if (!scanning || writer == null) return;
+            totalAdvertisements++;
             seen.add(mac);
-            if (!target) { scheduleUi(); return; }
-            String raw = record == null ? "" : hex(record.getBytes());
-            String service = serviceData(record);
-            String manufacturer = manufacturerData(record);
-            String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
-            try {
-                writer.write(csv(timestamp) + "," + csv(name) + "," + csv(mac) + ","
-                        + r.getRssi() + "," + csv(uuids) + "," + csv(raw)
-                        + "," + csv(service) + "," + csv(manufacturer) + "\n");
-                writer.flush();
+            if (target) {
                 count++;
                 last = "Nombre: " + name + "\nMAC: " + mac + "\nRSSI: " + r.getRssi()
+                        + "\nUUID: " + uuids + "\nService UUID: " + serviceUuids
                         + "\nHEX: " + raw;
                 Log.i(TAG, "TARGET_ADV n=" + count + " mac=" + mac
                         + " rssi=" + r.getRssi() + " raw=" + raw);
-            } catch (IOException ex) { Log.e(TAG, "FILE_WRITE", ex); }
+            } else {
+                lastOther = "Nombre: " + name + "\nMAC: " + mac
+                        + "\nUUID: " + uuids + "\nService UUID: " + serviceUuids;
+            }
+            // Keep one copy of each distinct non-target packet, plus all
+            // target packets. Bounded file size and passive scan only.
+            String signature = mac + "|" + name + "|" + raw;
+            boolean shouldSave = target || savedSignatures.add(signature);
+            if (shouldSave && savedAdvertisements < MAX_SAVED_ADVERTISEMENTS) {
+                String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS",
+                        Locale.US).format(new Date());
+                try {
+                    writer.write(csv(timestamp) + "," + (target ? "1" : "0") + ","
+                            + csv(name) + "," + csv(mac) + "," + r.getRssi() + ","
+                            + csv(uuids) + "," + csv(raw) + ","
+                            + csv(serviceData(record)) + ","
+                            + csv(manufacturerData(record)) + "\n");
+                    writer.flush();
+                    savedAdvertisements++;
+                } catch (IOException ex) { Log.e(TAG, "FILE_WRITE", ex); }
+            }
         }
         scheduleUi();
     }
@@ -189,8 +215,11 @@ public class MainActivity extends Activity {
 
     private void refresh() {
         results.setText("Dispositivos: " + seen.size()
-                + "\nAnuncios Instinct: " + count
-                + "\n\nUltimo anuncio:\n" + last
+                + "\nAnuncios recibidos: " + totalAdvertisements
+                + "\nAnuncios guardados: " + savedAdvertisements
+                + "\nPosibles Instinct: " + count
+                + "\n\nUltimo Instinct:\n" + last
+                + "\n\nUltimo otro BLE:\n" + lastOther
                 + "\n\nArchivo: " + (logFile == null ? "-" : logFile.getName()));
     }
 
@@ -204,7 +233,7 @@ public class MainActivity extends Activity {
         closeLog();
         button.setText("ESCANEAR 90 S");
         refresh();
-        status.setText("Detenido | " + count + " anuncios guardados");
+        status.setText("Detenido | " + count + " posibles Instinct");
         Log.i(TAG, "SCAN_STOPPED target_packets=" + count);
     }
 
