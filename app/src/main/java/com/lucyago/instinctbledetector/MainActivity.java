@@ -106,7 +106,7 @@ public class MainActivity extends Activity {
         if (!openCsv()) return;
         devices.clear();
         csvCaptures = 0;
-        results.setText("Buscando anuncios BLE...\\n");
+        results.setText("Buscando anuncios BLE...\n");
         // The previous match remains available on screen even if scan restarts.
         ScanSettings settings = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
         try {
@@ -171,8 +171,8 @@ public class MainActivity extends Activity {
             if (line.startsWith("***")) { matches++; all.insert(0, line + "\n\n"); }
         }
         if (matches == 0 && previousCandidate != null) {
-            all.append("ULTIMO INSTINCT (escaneo anterior):\\n")
-                    .append(previousCandidate).append("\\n\\n");
+            all.append("ULTIMO INSTINCT (escaneo anterior):\n")
+                    .append(previousCandidate).append("\n\n");
         }
         int shown = 0;
         for (String line : devices.values()) {
@@ -209,7 +209,7 @@ public class MainActivity extends Activity {
                 new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date()) + ".csv";
         try {
             csvWriter = new BufferedWriter(new FileWriter(new File(dir, csvName)));
-            csvWriter.write("timestamp_local,name,mac,rssi,uuids,service_uuids,manufacturer_ids,raw_scan_record_hex,service_data_hex,manufacturer_data_hex\\n");
+            csvWriter.write("timestamp_local,name,mac,rssi,uuids,service_uuids,manufacturer_ids,raw_scan_record_hex,service_data_hex,manufacturer_data_hex\n");
             csvWriter.flush();
             return true;
         } catch (IOException e) {
@@ -237,7 +237,7 @@ public class MainActivity extends Activity {
                 if (i != 0) csvWriter.write(',');
                 csvWriter.write(csv(cells[i]));
             }
-            csvWriter.write("\\n");
+            csvWriter.write("\n");
             csvWriter.flush();
             csvCaptures++;
             Log.i(TAG, "INSTINCT_CSV_CAPTURE " + csvName + " n=" + csvCaptures);
@@ -255,7 +255,7 @@ public class MainActivity extends Activity {
     }
 
     private static String csv(String value) {
-        return "\\\"" + value.replace("\\\"", "\\\"\\\"") + "\\\"";
+        return "\"" + value.replace("\"", "\"\"") + "\"";
     }
 
     private static String hex(byte[] bytes) {
