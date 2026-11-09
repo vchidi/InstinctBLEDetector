@@ -220,7 +220,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void saveCandidate(ScanResult r, String name, String mac, String uuids,
+    private synchronized void saveCandidate(ScanResult r, String name, String mac, String uuids,
                                String serviceUuids, String manufacturerIds) {
         if (csvWriter == null) return;
         ScanRecord rec = r.getScanRecord();
@@ -246,7 +246,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void closeCsv() {
+    private synchronized void closeCsv() {
         if (csvWriter != null) {
             try { csvWriter.flush(); csvWriter.close(); }
             catch (IOException e) { Log.e(TAG, "CSV_CLOSE", e); }
