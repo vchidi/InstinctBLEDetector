@@ -19,6 +19,8 @@ import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.ArrayAdapter;
+import android.widget.Spinner;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -43,13 +45,16 @@ public class MainActivity extends Activity {
     // Candidate from iPhone Bluetooth list; identity not yet confirmed.
     private static final String NEW_CANDIDATE_MAC = "F4:FB:F5:D5:15:1F";
     private static final int PERMISSION_REQUEST = 9;
-    private static final long SCAN_DURATION_MS = 90000;
+    private static final long[] SCAN_DURATIONS_MS = {90000L, 300000L, 600000L, 1800000L};
+    private static final String[] SCAN_LABELS = {"90 segundos", "5 minutos", "10 minutos", "30 minutos"};
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Map<String, String> devices = new LinkedHashMap<>();
     private BluetoothLeScanner scanner;
     private boolean scanning;
     private TextView status, results;
     private Button button;
+    private Spinner durationSelector;
+    private long activeDurationMs = 90000L;
     private BufferedWriter csvWriter;
     private String csvName = "-";
     private int csvCaptures = 0;
@@ -81,8 +86,14 @@ public class MainActivity extends Activity {
         status.setGravity(Gravity.CENTER);
         status.setText("Listo para escanear");
         root.addView(status);
+        durationSelector = new Spinner(this);
+        ArrayAdapter<String> durationAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, SCAN_LABELS);
+        durationAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        durationSelector.setAdapter(durationAdapter);
+        durationSelector.setSelection(0);
+        root.addView(durationSelector);
         button = new Button(this);
-        button.setText("ESCANEAR 90 s");
+        button.setText("ESCANEAR");
         button.setOnClickListener(v -> { if (scanning) stopScan(); else startScan(); });
         root.addView(button);
         ScrollView scroll = new ScrollView(this);
@@ -106,6 +117,8 @@ public class MainActivity extends Activity {
         scanner = adapter.getBluetoothLeScanner();
         if (scanner == null) { status.setText("Escáner BLE no disponible"); return; }
         if (!openCsv()) return;
+        activeDurationMs = SCAN_DURATIONS_MS[durationSelector.getSelectedItemPosition()];
+        durationSelector.setEnabled(false);
         devices.clear();
         csvCaptures = 0;
         results.setText("Buscando anuncios BLE...\n");
@@ -115,12 +128,13 @@ public class MainActivity extends Activity {
             scanner.startScan(null, settings, callback);
             scanning = true;
             button.setText("DETENER");
-            status.setText("Escaneando (90 s máximo)");
-            Log.i(TAG, "SCAN_STARTED passive=true duration=90s");
-            handler.postDelayed(timeout, SCAN_DURATION_MS);
+            status.setText("Escaneando: " + SCAN_LABELS[durationSelector.getSelectedItemPosition()]);
+            Log.i(TAG, "SCAN_STARTED passive=true duration_ms=" + activeDurationMs);
+            handler.postDelayed(timeout, activeDurationMs);
         } catch (SecurityException | IllegalStateException ex) {
             status.setText("No se pudo escanear: " + ex.getClass().getSimpleName());
             closeCsv();
+            durationSelector.setEnabled(true);
             Log.e(TAG, "SCAN_EXCEPTION", ex);
         }
     }
@@ -193,8 +207,9 @@ public class MainActivity extends Activity {
             try { scanner.stopScan(callback); } catch (SecurityException ignored) { }
         }
         scanning = false;
+        durationSelector.setEnabled(true);
         closeCsv();
-        button.setText("ESCANEAR 90 s");
+        button.setText("ESCANEAR");
         status.setText("Detenido | " + devices.size() + " dispositivos | " + csvCaptures + " capturas");
         Log.i(TAG, "SCAN_STOPPED count=" + devices.size());
     }
