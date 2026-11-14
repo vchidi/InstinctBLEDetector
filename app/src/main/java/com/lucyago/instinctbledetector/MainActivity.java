@@ -51,13 +51,17 @@ public class MainActivity extends Activity {
     private final Map<String, String> devices = new LinkedHashMap<>();
     private BluetoothLeScanner scanner;
     private boolean scanning;
-    private TextView status, results;
+    private TextView status, results, summary;
     private Button button;
     private Spinner durationSelector;
     private long activeDurationMs = 90000L;
     private BufferedWriter csvWriter;
     private String csvName = "-";
     private int csvCaptures = 0;
+    private int totalAdvertisements = 0;
+    private int candidateAdvertisements = 0;
+    private static final int MAX_CSV_ROWS = 10000;
+    private long lastUiUpdateMs = 0;
     private String previousCandidate = null;
     private final Runnable timeout = this::stopScan;
 
@@ -96,6 +100,12 @@ public class MainActivity extends Activity {
         button.setText("ESCANEAR");
         button.setOnClickListener(v -> { if (scanning) stopScan(); else startScan(); });
         root.addView(button);
+        summary = new TextView(this);
+        summary.setTextColor(0xffffffff);
+        summary.setTextSize(14);
+        summary.setGravity(Gravity.CENTER);
+        summary.setText("Dispositivos: 0 | Instinct: 0\nAnuncios: 0 | CSV: 0");
+        root.addView(summary);
         ScrollView scroll = new ScrollView(this);
         results = new TextView(this);
         results.setTextColor(0xffc7e8ff);
@@ -121,6 +131,10 @@ public class MainActivity extends Activity {
         durationSelector.setEnabled(false);
         devices.clear();
         csvCaptures = 0;
+        totalAdvertisements = 0;
+        candidateAdvertisements = 0;
+        lastUiUpdateMs = 0;
+        summary.setText("Dispositivos: 0 | Instinct: 0\nAnuncios: 0 | CSV: 0");
         results.setText("Buscando anuncios BLE...\n");
         // The previous match remains available on screen even if scan restarts.
         ScanSettings settings = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
@@ -161,13 +175,18 @@ public class MainActivity extends Activity {
                 + " manufacturers=" + manufacturerIds;
         if (candidate) {
             previousCandidate = line;
-            saveCandidate(r, name, mac, uuids, serviceData, manufacturerIds);
+            candidateAdvertisements++;
         }
+        totalAdvertisements++;
+        if (csvCaptures < MAX_CSV_ROWS) saveCandidate(r, name, mac, uuids, serviceData, manufacturerIds);
         // One log entry per device/changed data, rather than every advertisement.
         String old = devices.put(mac, line);
         if (!line.equals(old)) Log.i(TAG, line);
         if (devices.size() > 150) { String first = devices.keySet().iterator().next(); devices.remove(first); }
-        runOnUiThread(this::updateDisplay);
+        if (System.currentTimeMillis() - lastUiUpdateMs > 1000) {
+            lastUiUpdateMs = System.currentTimeMillis();
+            runOnUiThread(this::updateDisplay);
+        }
     }
 
     private String manufacturerIds(ScanResult r) {
@@ -181,7 +200,6 @@ public class MainActivity extends Activity {
     }
 
     private void updateDisplay() {
-        if (devices.isEmpty()) return;
         int matches = 0;
         StringBuilder all = new StringBuilder();
         for (String line : devices.values()) {
@@ -195,9 +213,13 @@ public class MainActivity extends Activity {
         for (String line : devices.values()) {
             if (!line.startsWith("***") && shown++ < 20) all.append(line).append("\n\n");
         }
-        status.setText((scanning ? "Escaneando" : "Detenido") + " | " + devices.size() + " dispositivos | " + matches + " posibles");
+        status.setText(scanning ? "Escaneando..." : "Finalizado");
+        summary.setText("Dispositivos: " + devices.size() + " | Instinct: " + matches
+                + "\nAnuncios: " + totalAdvertisements + " | CSV: " + csvCaptures
+                + "\nCandidatos: " + candidateAdvertisements);
         all.append("CSV: ").append(csvName)
-                .append(" | anuncios Instinct guardados: ").append(csvCaptures);
+                .append(" | anuncios BLE guardados: ").append(csvCaptures)
+                .append("\nLímite CSV: ").append(MAX_CSV_ROWS);
         results.setText(all.toString());
     }
 
@@ -210,20 +232,21 @@ public class MainActivity extends Activity {
         durationSelector.setEnabled(true);
         closeCsv();
         button.setText("ESCANEAR");
-        status.setText("Detenido | " + devices.size() + " dispositivos | " + csvCaptures + " capturas");
+        updateDisplay();
+        status.setText("Finalizado");
         Log.i(TAG, "SCAN_STOPPED count=" + devices.size());
     }
 
 
-    // Only writes matching advertisements: the successful v1 BLE scan and
-    // its per-device display processing remain unchanged.
+    // Capture all nearby BLE advertisements, including unknown sensor identities.
+    // Passive scan only; limit CSV rows to bound storage usage.
     private boolean openCsv() {
         File dir = getExternalFilesDir(null);
         if (dir == null) {
             status.setText("No hay almacenamiento para CSV");
             return false;
         }
-        csvName = "instinct_v1_capturas_" +
+        csvName = "ble_todos_v13_" +
                 new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date()) + ".csv";
         try {
             csvWriter = new BufferedWriter(new FileWriter(new File(dir, csvName)));
