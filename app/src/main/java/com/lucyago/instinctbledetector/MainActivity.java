@@ -40,6 +40,8 @@ public class MainActivity extends Activity {
     private static final String TARGET_UUID = "089810cc-ef89-11e9-81b4-2a2ae2dbcce4";
     private static final String TARGET_PREFIX = "E46447A3";
     private static final String TARGET_MAC = "E4:64:47:A3:0C:A0";
+    // Candidate from iPhone Bluetooth list; identity not yet confirmed.
+    private static final String NEW_CANDIDATE_MAC = "F4:FB:F5:D5:15:1F";
     private static final int PERMISSION_REQUEST = 9;
     private static final long SCAN_DURATION_MS = 90000;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -136,9 +138,10 @@ public class MainActivity extends Activity {
                 ? manufacturerIds(r) : "[]";
         boolean candidate = name.toUpperCase(Locale.ROOT).contains(TARGET_PREFIX)
                 || mac.equalsIgnoreCase(TARGET_MAC)
+                || mac.equalsIgnoreCase(NEW_CANDIDATE_MAC)
                 || uuids.toLowerCase(Locale.ROOT).contains(TARGET_UUID)
                 || serviceData.toLowerCase(Locale.ROOT).contains(TARGET_UUID);
-        String line = (candidate ? "*** POSIBLE INSTINCT *** " : "")
+        String line = (candidate ? (mac.equalsIgnoreCase(NEW_CANDIDATE_MAC) ? "*** CANDIDATO NUEVO (sin confirmar) *** " : "*** POSIBLE INSTINCT *** ") : "")
                 + "name=" + name + " mac=" + mac + " rssi=" + r.getRssi()
                 + " uuids=" + uuids + " serviceData=" + serviceData
                 + " manufacturers=" + manufacturerIds;
