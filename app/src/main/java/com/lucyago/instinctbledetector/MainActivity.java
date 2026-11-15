@@ -63,7 +63,7 @@ public class MainActivity extends Activity {
     private int csvCaptures = 0;
     private int totalAdvertisements = 0;
     private int candidateAdvertisements = 0;
-    private static final int MAX_CSV_ROWS = 10000;
+    private static final int MAX_CSV_ROWS = 100000;
     private long lastUiUpdateMs = 0;
     private String previousCandidate = null;
     private final Runnable timeout = this::stopScan;
@@ -258,7 +258,7 @@ public class MainActivity extends Activity {
             status.setText("No hay almacenamiento para CSV");
             return false;
         }
-        csvName = "ble_comparacion_v14_" + phaseTag + "_" +
+        csvName = "ble_comparacion_v15_" + phaseTag + "_" +
                 new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date()) + ".csv";
         try {
             csvWriter = new BufferedWriter(new FileWriter(new File(dir, csvName)));
