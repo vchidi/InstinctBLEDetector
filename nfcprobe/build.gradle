@@ -1,0 +1,13 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.lucyago.instinctnfcinfo'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.lucyago.instinctnfcinfo'
+        minSdk 30
+        targetSdk 35
+        versionCode 1
+        versionName '0.1'
+    }
+}
