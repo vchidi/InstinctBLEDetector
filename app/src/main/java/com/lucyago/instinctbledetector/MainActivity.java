@@ -54,6 +54,9 @@ public class MainActivity extends Activity {
     private TextView status, results, summary;
     private Button button;
     private Spinner durationSelector;
+    private Spinner phaseSelector;
+    private static final String[] PHASE_LABELS = {"BASE: iPhone conectado", "EVENTO: perdida de senal"};
+    private String phaseTag = "base";
     private long activeDurationMs = 90000L;
     private BufferedWriter csvWriter;
     private String csvName = "-";
@@ -96,6 +99,11 @@ public class MainActivity extends Activity {
         durationSelector.setAdapter(durationAdapter);
         durationSelector.setSelection(0);
         root.addView(durationSelector);
+        phaseSelector = new Spinner(this);
+        ArrayAdapter<String> phaseAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, PHASE_LABELS);
+        phaseAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        phaseSelector.setAdapter(phaseAdapter);
+        root.addView(phaseSelector);
         button = new Button(this);
         button.setText("ESCANEAR");
         button.setOnClickListener(v -> { if (scanning) stopScan(); else startScan(); });
@@ -126,7 +134,9 @@ public class MainActivity extends Activity {
         if (adapter == null || !adapter.isEnabled()) { status.setText("Activa Bluetooth"); return; }
         scanner = adapter.getBluetoothLeScanner();
         if (scanner == null) { status.setText("Escáner BLE no disponible"); return; }
+        phaseTag = phaseSelector.getSelectedItemPosition() == 0 ? "base" : "evento";
         if (!openCsv()) return;
+        phaseSelector.setEnabled(false);
         activeDurationMs = SCAN_DURATIONS_MS[durationSelector.getSelectedItemPosition()];
         durationSelector.setEnabled(false);
         devices.clear();
@@ -142,13 +152,14 @@ public class MainActivity extends Activity {
             scanner.startScan(null, settings, callback);
             scanning = true;
             button.setText("DETENER");
-            status.setText("Escaneando: " + SCAN_LABELS[durationSelector.getSelectedItemPosition()]);
+            status.setText("Escaneando " + phaseTag + ": " + SCAN_LABELS[durationSelector.getSelectedItemPosition()]);
             Log.i(TAG, "SCAN_STARTED passive=true duration_ms=" + activeDurationMs);
             handler.postDelayed(timeout, activeDurationMs);
         } catch (SecurityException | IllegalStateException ex) {
             status.setText("No se pudo escanear: " + ex.getClass().getSimpleName());
             closeCsv();
             durationSelector.setEnabled(true);
+            phaseSelector.setEnabled(true);
             Log.e(TAG, "SCAN_EXCEPTION", ex);
         }
     }
@@ -214,7 +225,7 @@ public class MainActivity extends Activity {
             if (!line.startsWith("***") && shown++ < 20) all.append(line).append("\n\n");
         }
         status.setText(scanning ? "Escaneando..." : "Finalizado");
-        summary.setText("Dispositivos: " + devices.size() + " | Instinct: " + matches
+        summary.setText("Modo: " + phaseTag.toUpperCase(Locale.ROOT) + "\\nDispositivos: " + devices.size() + " | Instinct: " + matches
                 + "\nAnuncios: " + totalAdvertisements + " | CSV: " + csvCaptures
                 + "\nCandidatos: " + candidateAdvertisements);
         all.append("CSV: ").append(csvName)
@@ -230,6 +241,7 @@ public class MainActivity extends Activity {
         }
         scanning = false;
         durationSelector.setEnabled(true);
+        phaseSelector.setEnabled(true);
         closeCsv();
         button.setText("ESCANEAR");
         updateDisplay();
@@ -246,7 +258,7 @@ public class MainActivity extends Activity {
             status.setText("No hay almacenamiento para CSV");
             return false;
         }
-        csvName = "ble_todos_v13_" +
+        csvName = "ble_comparacion_v14_" + phaseTag + "_" +
                 new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date()) + ".csv";
         try {
             csvWriter = new BufferedWriter(new FileWriter(new File(dir, csvName)));
