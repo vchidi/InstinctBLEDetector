@@ -43,7 +43,7 @@ public class MainActivity extends Activity {
     private static final String TARGET_PREFIX = "E46447A3";
     private static final String TARGET_MAC = "E4:64:47:A3:0C:A0";
     // Candidate from iPhone Bluetooth list; identity not yet confirmed.
-    private static final String NEW_CANDIDATE_MAC = "F4:FB:F5:D5:15:1F";
+    private static final String NEW_CANDIDATE_MAC = "F4:FB:F5:FD:51:5F";
     private static final int PERMISSION_REQUEST = 9;
     private static final long[] SCAN_DURATIONS_MS = {90000L, 300000L, 600000L, 1800000L};
     private static final String[] SCAN_LABELS = {"90 segundos", "5 minutos", "10 minutos", "30 minutos"};
@@ -59,6 +59,20 @@ public class MainActivity extends Activity {
     private String phaseTag = "base";
     private long activeDurationMs = 90000L;
     private BufferedWriter csvWriter;
+    private BufferedWriter healthWriter;
+    private String healthName = "-";
+    private long scanStartMs = 0L;
+    private long lastAdvertisementMs = 0L;
+    private long lastCandidateMs = 0L;
+    private int scanErrorCode = 0;
+    private final Runnable heartbeat = new Runnable() {
+        @Override public void run() {
+            if (!scanning) return;
+            writeHealth("HEARTBEAT");
+            updateDisplay();
+            handler.postDelayed(this, 10000L);
+        }
+    };
     private String csvName = "-";
     private int csvCaptures = 0;
     private int totalAdvertisements = 0;
@@ -77,7 +91,7 @@ public class MainActivity extends Activity {
         }
         @Override public void onScanFailed(int errorCode) {
             Log.e(TAG, "SCAN_FAILED code=" + errorCode);
-            runOnUiThread(() -> { status.setText("Error de escaneo: " + errorCode); stopScan(); });
+            runOnUiThread(() -> { scanErrorCode = errorCode; writeHealth("SCAN_FAILED"); stopScan(); status.setText("Error de escaneo: " + errorCode); });
         }
     };
 
@@ -136,6 +150,7 @@ public class MainActivity extends Activity {
         if (scanner == null) { status.setText("Escáner BLE no disponible"); return; }
         phaseTag = phaseSelector.getSelectedItemPosition() == 0 ? "base" : "evento";
         if (!openCsv()) return;
+        if (!openHealthCsv()) { closeCsv(); return; }
         phaseSelector.setEnabled(false);
         activeDurationMs = SCAN_DURATIONS_MS[durationSelector.getSelectedItemPosition()];
         durationSelector.setEnabled(false);
@@ -144,6 +159,9 @@ public class MainActivity extends Activity {
         totalAdvertisements = 0;
         candidateAdvertisements = 0;
         lastUiUpdateMs = 0;
+        lastAdvertisementMs = 0L;
+        lastCandidateMs = 0L;
+        scanErrorCode = 0;
         summary.setText("Dispositivos: 0 | Instinct: 0\nAnuncios: 0 | CSV: 0");
         results.setText("Buscando anuncios BLE...\n");
         // The previous match remains available on screen even if scan restarts.
@@ -151,6 +169,9 @@ public class MainActivity extends Activity {
         try {
             scanner.startScan(null, settings, callback);
             scanning = true;
+            scanStartMs = System.currentTimeMillis();
+            writeHealth("START");
+            handler.postDelayed(heartbeat, 10000L);
             button.setText("DETENER");
             status.setText("Escaneando " + phaseTag + ": " + SCAN_LABELS[durationSelector.getSelectedItemPosition()]);
             Log.i(TAG, "SCAN_STARTED passive=true duration_ms=" + activeDurationMs);
@@ -158,6 +179,7 @@ public class MainActivity extends Activity {
         } catch (SecurityException | IllegalStateException ex) {
             status.setText("No se pudo escanear: " + ex.getClass().getSimpleName());
             closeCsv();
+            closeHealthCsv();
             durationSelector.setEnabled(true);
             phaseSelector.setEnabled(true);
             Log.e(TAG, "SCAN_EXCEPTION", ex);
@@ -185,10 +207,12 @@ public class MainActivity extends Activity {
                 + " uuids=" + uuids + " serviceData=" + serviceData
                 + " manufacturers=" + manufacturerIds;
         if (candidate) {
+            lastCandidateMs = System.currentTimeMillis();
             previousCandidate = line;
             candidateAdvertisements++;
         }
         totalAdvertisements++;
+        lastAdvertisementMs = System.currentTimeMillis();
         if (csvCaptures < MAX_CSV_ROWS) saveCandidate(r, name, mac, uuids, serviceData, manufacturerIds);
         // One log entry per device/changed data, rather than every advertisement.
         String old = devices.put(mac, line);
@@ -225,10 +249,15 @@ public class MainActivity extends Activity {
             if (!line.startsWith("***") && shown++ < 20) all.append(line).append("\n\n");
         }
         status.setText(scanning ? "Escaneando..." : "Finalizado");
-        summary.setText("Modo: " + phaseTag.toUpperCase(Locale.ROOT) + "\\nDispositivos: " + devices.size() + " | Instinct: " + matches
+        summary.setText("Modo: " + phaseTag.toUpperCase(Locale.ROOT) + "\nDispositivos: " + devices.size() + " | Instinct: " + matches
                 + "\nAnuncios: " + totalAdvertisements + " | CSV: " + csvCaptures
-                + "\nCandidatos: " + candidateAdvertisements);
-        all.append("CSV: ").append(csvName)
+                + "\nCandidatos: " + candidateAdvertisements
+                + "\nUltimo anuncio: " + ageSeconds(lastAdvertisementMs)
+                + " | Instinct: " + ageSeconds(lastCandidateMs)
+                + "\nEstado: " + (scanning ? "ESCANEANDO" : "DETENIDO")
+                + " | Error: " + scanErrorCode);
+        all.append("Estado CSV: ").append(healthName).append("\n")
+                .append("CSV: ").append(csvName)
                 .append(" | anuncios BLE guardados: ").append(csvCaptures)
                 .append("\nLímite CSV: ").append(MAX_CSV_ROWS);
         results.setText(all.toString());
@@ -236,19 +265,63 @@ public class MainActivity extends Activity {
 
     private void stopScan() {
         handler.removeCallbacks(timeout);
+        handler.removeCallbacks(heartbeat);
         if (scanning && scanner != null) {
             try { scanner.stopScan(callback); } catch (SecurityException ignored) { }
         }
+        if (scanning) writeHealth("STOP");
         scanning = false;
         durationSelector.setEnabled(true);
         phaseSelector.setEnabled(true);
         closeCsv();
+        closeHealthCsv();
         button.setText("ESCANEAR");
         updateDisplay();
         status.setText("Finalizado");
         Log.i(TAG, "SCAN_STOPPED count=" + devices.size());
     }
 
+
+    private String ageSeconds(long when) {
+        return when == 0L ? "nunca" : ((System.currentTimeMillis() - when) / 1000L) + "s";
+    }
+
+    private boolean openHealthCsv() {
+        File dir = getExternalFilesDir(null);
+        if (dir == null) return false;
+        healthName = csvName.replace("ble_comparacion_v16_", "ble_estado_v16_");
+        try {
+            healthWriter = new BufferedWriter(new FileWriter(new File(dir, healthName)));
+            healthWriter.write("timestamp_local,event,scanning,elapsed_seconds,total_ads,csv_rows,candidate_ads,last_ad_age_seconds,last_candidate_age_seconds,error_code\\n");
+            healthWriter.flush();
+            return true;
+        } catch (IOException e) {
+            Log.e(TAG, "HEALTH_OPEN", e);
+            status.setText("Error al crear CSV de estado");
+            return false;
+        }
+    }
+
+    private synchronized void writeHealth(String event) {
+        if (healthWriter == null) return;
+        long now = System.currentTimeMillis();
+        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date(now));
+        String row = timestamp + "," + event + "," + scanning + ","
+                + (scanStartMs == 0L ? 0 : (now - scanStartMs) / 1000L) + ","
+                + totalAdvertisements + "," + csvCaptures + "," + candidateAdvertisements + ","
+                + (lastAdvertisementMs == 0L ? -1 : (now - lastAdvertisementMs) / 1000L) + ","
+                + (lastCandidateMs == 0L ? -1 : (now - lastCandidateMs) / 1000L) + ","
+                + scanErrorCode + "\\n";
+        try { healthWriter.write(row); healthWriter.flush(); }
+        catch (IOException e) { Log.e(TAG, "HEALTH_WRITE", e); }
+    }
+
+    private synchronized void closeHealthCsv() {
+        if (healthWriter == null) return;
+        try { healthWriter.flush(); healthWriter.close(); }
+        catch (IOException e) { Log.e(TAG, "HEALTH_CLOSE", e); }
+        healthWriter = null;
+    }
 
     // Capture all nearby BLE advertisements, including unknown sensor identities.
     // Passive scan only; limit CSV rows to bound storage usage.
@@ -258,7 +331,7 @@ public class MainActivity extends Activity {
             status.setText("No hay almacenamiento para CSV");
             return false;
         }
-        csvName = "ble_comparacion_v15_" + phaseTag + "_" +
+        csvName = "ble_comparacion_v16_" + phaseTag + "_" +
                 new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date()) + ".csv";
         try {
             csvWriter = new BufferedWriter(new FileWriter(new File(dir, csvName)));
