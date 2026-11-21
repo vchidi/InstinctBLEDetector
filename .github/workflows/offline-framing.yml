@@ -1,0 +1,27 @@
+name: Offline glucose frame tests
+on:
+  workflow_dispatch:
+  push:
+    branches: [experiment/passive-ble-only]
+    paths:
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucoseFrameAssembler.java'
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucosePipeline.java'
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineFrameSelfTest.java'
+      - '.github/workflows/offline-framing.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Compile and run offline framing test
+        run: |
+          mkdir -p /tmp/instinct-offline-test
+          javac -d /tmp/instinct-offline-test \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucoseFrameAssembler.java \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucosePipeline.java \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineFrameSelfTest.java
+          java -cp /tmp/instinct-offline-test com.lucyago.instinctpassive.OfflineFrameSelfTest
