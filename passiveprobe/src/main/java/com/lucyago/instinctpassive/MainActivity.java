@@ -32,6 +32,12 @@ public class MainActivity extends Activity {
     private boolean running;
     private int count;
     private int matching;
+    private int compatiblePackets;
+    private int minRssi=127, maxRssi=-127;
+    private long sumRssi;
+    private int sampleCount;
+    private final Set<Integer> manufacturerIds = new HashSet<>();
+    private final Set<String> serviceDataShapes = new HashSet<>();
     private final Runnable stopLater = this::stopScan;
     private final ScanCallback callback = new ScanCallback() {
         @Override public void onScanResult(int callbackType, ScanResult result) { process(result); }
@@ -53,7 +59,7 @@ public class MainActivity extends Activity {
         title.setTextSize(21);
         layout.addView(title);
         TextView description = new TextView(this);
-        description.setText("\nSolo observa anuncios Bluetooth durante 90 segundos. NO se conecta al sensor, NO solicita servicios GATT, NO escribe datos y NO obtiene glucosa. Si MiniMed Go ya está conectado, puede no haber anuncios visibles.\n");
+        description.setText("\nSolo observa anuncios Bluetooth durante 90 segundos y resume RSSI, identificadores públicos de fabricante y tamaños de datos anunciados. NO se conecta al sensor, NO solicita servicios GATT, NO escribe datos y NO obtiene glucosa. Si MiniMed Go ya está conectado, puede no haber anuncios visibles.\n");
         layout.addView(description);
         start = new Button(this);
         start.setText("Escanear 90 segundos");
@@ -88,7 +94,9 @@ public class MainActivity extends Activity {
         }
         scanner = adapter.getBluetoothLeScanner();
         if (scanner == null) { output.setText("No se puede iniciar el escáner BLE."); return; }
-        seen.clear(); count=0; matching=0;
+        seen.clear(); count=0; matching=0; compatiblePackets=0;
+        minRssi=127; maxRssi=-127; sumRssi=0; sampleCount=0;
+        manufacturerIds.clear(); serviceDataShapes.clear();
         output.setText("Escaneando anuncios BLE (90 s). Sin conexiones.");
         ScanSettings settings = new ScanSettings.Builder()
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
@@ -110,12 +118,31 @@ public class MainActivity extends Activity {
         }
         // MAC is not displayed or exported. Android may randomize addresses.
         String key = r.getDevice().getAddress();
-        if (match && seen.add(key)) {
-            matching++;
-            final int rssi=r.getRssi();
-            final int num=matching;
-            runOnUiThread(() -> append("Posible sensor #" + num + " | RSSI " + rssi +
-                    " dBm | servicio Libre 3 anunciado. No confirma Instinct Go."));
+        if (match) {
+            compatiblePackets++;
+            int rssi=r.getRssi();
+            minRssi=Math.min(minRssi,rssi);
+            maxRssi=Math.max(maxRssi,rssi);
+            sumRssi+=rssi;
+            sampleCount++;
+            android.bluetooth.le.ScanRecord record=r.getScanRecord();
+            android.util.SparseArray<byte[]> manufacturer=record.getManufacturerSpecificData();
+            if (manufacturer!=null) {
+                for(int i=0;i<manufacturer.size();i++) manufacturerIds.add(manufacturer.keyAt(i));
+            }
+            java.util.Map<android.os.ParcelUuid,byte[]> serviceData=record.getServiceData();
+            if(serviceData!=null) {
+                for(java.util.Map.Entry<android.os.ParcelUuid,byte[]> entry:serviceData.entrySet()) {
+                    byte[] data=entry.getValue();
+                    serviceDataShapes.add(entry.getKey().toString()+": "+(data==null?0:data.length)+" bytes");
+                }
+            }
+            if (seen.add(key)) {
+                matching++;
+                final int num=matching;
+                runOnUiThread(() -> append("Dispositivo compatible #" + num +
+                    " | primer RSSI " + rssi + " dBm. Identidad sin confirmar."));
+            }
         }
     }
     private void stopScan() {
@@ -125,9 +152,19 @@ public class MainActivity extends Activity {
             try { if (scanner!=null) scanner.stopScan(callback); }
             catch (SecurityException ignored) {}
             start.setEnabled(true);
-            append("Finalizado. Anuncios observados: " + count +
+            append("Finalizado. Anuncios totales: " + count +
                     ". Dispositivos con UUID compatible: " + matching +
+                    ". Anuncios compatibles: " + compatiblePackets +
                     ". Ninguna conexión realizada.");
+            if (sampleCount>0) {
+                append("RSSI compatibles: mínimo " + minRssi + " dBm, máximo " +
+                    maxRssi + " dBm, media " + (sumRssi/sampleCount) + " dBm.");
+                append("Identificadores públicos de fabricante BLE (no números de serie): " +
+                    (manufacturerIds.isEmpty() ? "ninguno" : manufacturerIds.toString()));
+                append("Longitudes de datos de servicio: " +
+                    (serviceDataShapes.isEmpty() ? "ninguna" : serviceDataShapes.toString()));
+                append("No se guardan direcciones MAC, datos binarios ni identificadores privados.");
+            }
         }
     }
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grants) {
