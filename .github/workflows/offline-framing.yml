@@ -8,6 +8,9 @@ on:
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucosePipeline.java'
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineFrameSelfTest.java'
       - '.github/workflows/offline-framing.yml'
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/SessionGate.java'
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineGlucoseTransport.java'
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineTransportSelfTest.java'
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -23,5 +26,9 @@ jobs:
           javac -d /tmp/instinct-offline-test \
             passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucoseFrameAssembler.java \
             passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucosePipeline.java \
-            passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineFrameSelfTest.java
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineFrameSelfTest.java \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/SessionGate.java \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineGlucoseTransport.java \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineTransportSelfTest.java
           java -cp /tmp/instinct-offline-test com.lucyago.instinctpassive.OfflineFrameSelfTest
+          java -cp /tmp/instinct-offline-test com.lucyago.instinctpassive.OfflineTransportSelfTest
