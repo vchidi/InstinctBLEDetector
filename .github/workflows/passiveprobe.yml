@@ -2,7 +2,7 @@ name: Instinct BLE Passive (Android phone)
 on:
   workflow_dispatch:
   push:
-    branches: [experiment/passive-ble-only]
+    branches: [experiment/passive-ble-only, experiment/pre-replacement-gatt]
     paths:
       - 'passiveprobe/**'
       - 'settings.gradle'
