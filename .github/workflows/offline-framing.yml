@@ -2,12 +2,18 @@ name: Offline glucose frame tests
 on:
   workflow_dispatch:
   push:
-    branches: [experiment/passive-ble-only]
+    branches: [experiment/passive-ble-only, experiment/pre-replacement-gatt]
     paths:
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucoseFrameAssembler.java'
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucosePipeline.java'
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineFrameSelfTest.java'
       - '.github/workflows/offline-framing.yml'
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucoseReading.java'
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/AuthenticatedGlucoseDecoder.java'
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/InstinctGoDecoder.java'
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucoseReadingValidator.java'
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineGlucosePipeline.java'
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineDecoderSelfTest.java'
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/SessionGate.java'
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineGlucoseTransport.java'
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineTransportSelfTest.java'
@@ -29,6 +35,13 @@ jobs:
             passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineFrameSelfTest.java \
             passiveprobe/src/main/java/com/lucyago/instinctpassive/SessionGate.java \
             passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineGlucoseTransport.java \
-            passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineTransportSelfTest.java
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineTransportSelfTest.java \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucoseReading.java \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/AuthenticatedGlucoseDecoder.java \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/InstinctGoDecoder.java \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucoseReadingValidator.java \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineGlucosePipeline.java \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineDecoderSelfTest.java
           java -cp /tmp/instinct-offline-test com.lucyago.instinctpassive.OfflineFrameSelfTest
           java -cp /tmp/instinct-offline-test com.lucyago.instinctpassive.OfflineTransportSelfTest
+          java -cp /tmp/instinct-offline-test com.lucyago.instinctpassive.OfflineDecoderSelfTest
