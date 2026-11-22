@@ -14,6 +14,8 @@ on:
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucoseReadingValidator.java'
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineGlucosePipeline.java'
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineDecoderSelfTest.java'
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/Libre3GattFingerprint.java'
+      - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/GattFingerprintSelfTest.java'
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/SessionGate.java'
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineGlucoseTransport.java'
       - 'passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineTransportSelfTest.java'
@@ -41,7 +43,10 @@ jobs:
             passiveprobe/src/main/java/com/lucyago/instinctpassive/InstinctGoDecoder.java \
             passiveprobe/src/main/java/com/lucyago/instinctpassive/GlucoseReadingValidator.java \
             passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineGlucosePipeline.java \
-            passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineDecoderSelfTest.java
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/OfflineDecoderSelfTest.java \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/Libre3GattFingerprint.java \
+            passiveprobe/src/main/java/com/lucyago/instinctpassive/GattFingerprintSelfTest.java
           java -cp /tmp/instinct-offline-test com.lucyago.instinctpassive.OfflineFrameSelfTest
           java -cp /tmp/instinct-offline-test com.lucyago.instinctpassive.OfflineTransportSelfTest
           java -cp /tmp/instinct-offline-test com.lucyago.instinctpassive.OfflineDecoderSelfTest
+          java -cp /tmp/instinct-offline-test com.lucyago.instinctpassive.GattFingerprintSelfTest
