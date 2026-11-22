@@ -245,15 +245,20 @@ public class MainActivity extends Activity {
                 if(!gattBusy || g!=activeGatt) return;
                 if(status==BluetoothGatt.GATT_SUCCESS) {
                     int total=0;
+                    java.util.Set<UUID> services=new java.util.HashSet<>();
+                    java.util.Set<UUID> characteristics=new java.util.HashSet<>();
                     for(BluetoothGattService service:g.getServices()) {
+                        services.add(service.getUuid());
                         append("SERVICIO "+service.getUuid());
                         for(BluetoothGattCharacteristic ch:service.getCharacteristics()) {
+                            characteristics.add(ch.getUuid());
                             append("  CARACTERÍSTICA "+ch.getUuid()+" propiedades=0x"+
                                 Integer.toHexString(ch.getProperties()));
                             total++;
                         }
                     }
                     append("Descubrimiento terminado. Características: "+total);
+                    append(Libre3GattFingerprint.inspect(services,characteristics).summary());
                 } else append("Error descubriendo servicios: "+status);
                 closeGatt();
             });
