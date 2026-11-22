@@ -3,6 +3,14 @@ package com.lucyago.instinctpassive;
 import android.Manifest;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothGatt;
+import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothProfile;
+import android.app.AlertDialog;
+import android.content.Intent;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
@@ -29,6 +37,12 @@ public class MainActivity extends Activity {
     private BluetoothLeScanner scanner;
     private TextView output;
     private Button start;
+    private Button inspect;
+    private Button share;
+    private BluetoothDevice candidate;
+    private BluetoothGatt activeGatt;
+    private boolean gattBusy;
+    private final Runnable gattTimeout = () -> { append("Tiempo límite GATT (20 s)."); closeGatt(); };
     private boolean running;
     private int count;
     private int matching;
@@ -55,15 +69,22 @@ public class MainActivity extends Activity {
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(28, 32, 28, 24);
         TextView title = new TextView(this);
-        title.setText("Instinct Go — exploración BLE pasiva");
+        title.setText("Instinct Go — prueba antes del cambio");
         title.setTextSize(21);
         layout.addView(title);
         TextView description = new TextView(this);
-        description.setText("\nSolo observa anuncios Bluetooth durante 90 segundos y resume RSSI, identificadores públicos de fabricante y tamaños de datos anunciados. NO se conecta al sensor, NO solicita servicios GATT, NO escribe datos y NO obtiene glucosa. Si MiniMed Go ya está conectado, puede no haber anuncios visibles.\n");
+        description.setText("\n1. Escaneo pasivo 90 s. 2. Opcional: conexión GATT experimental de 20 s SOLO justo antes de retirar el sensor antiguo. Puede interrumpir MiniMed Go. NO autentica ni obtiene glucosa. No probar con el sensor nuevo.\n");
         layout.addView(description);
         start = new Button(this);
         start.setText("Escanear 90 segundos");
         layout.addView(start);
+        inspect = new Button(this);
+        inspect.setText("2. Explorar GATT (riesgo, solo antes del cambio)");
+        inspect.setEnabled(false);
+        layout.addView(inspect);
+        share = new Button(this);
+        share.setText("Compartir informe");
+        layout.addView(share);
         output = new TextView(this);
         output.setText("Esperando. No hace falta desconectar el iPhone.");
         layout.addView(output);
@@ -71,12 +92,14 @@ public class MainActivity extends Activity {
         scroll.addView(layout);
         setContentView(scroll);
         start.setOnClickListener(v -> begin());
+        inspect.setOnClickListener(v -> confirmGatt());
+        share.setOnClickListener(v -> shareReport());
     }
     private void append(String message) {
         output.append("\n" + message);
     }
     private void begin() {
-        if (running) return;
+        if (running || gattBusy) return;
         BluetoothManager manager = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
         BluetoothAdapter adapter = manager == null ? null : manager.getAdapter();
         if (adapter == null || !adapter.isEnabled()) {
@@ -94,6 +117,7 @@ public class MainActivity extends Activity {
         }
         scanner = adapter.getBluetoothLeScanner();
         if (scanner == null) { output.setText("No se puede iniciar el escáner BLE."); return; }
+        candidate=null; inspect.setEnabled(false);
         seen.clear(); count=0; matching=0; compatiblePackets=0;
         minRssi=127; maxRssi=-127; sumRssi=0; sampleCount=0;
         manufacturerIds.clear(); serviceDataShapes.clear();
@@ -139,6 +163,7 @@ public class MainActivity extends Activity {
             }
             if (seen.add(key)) {
                 matching++;
+                if (matching==1) candidate=r.getDevice(); else candidate=null;
                 final int num=matching;
                 runOnUiThread(() -> append("Dispositivo compatible #" + num +
                     " | primer RSSI " + rssi + " dBm. Identidad sin confirmar."));
@@ -164,9 +189,94 @@ public class MainActivity extends Activity {
                 append("Longitudes de datos de servicio: " +
                     (serviceDataShapes.isEmpty() ? "ninguna" : serviceDataShapes.toString()));
                 append("No se guardan direcciones MAC, datos binarios ni identificadores privados.");
+                if(matching==1 && candidate!=null) {
+                    inspect.setEnabled(true);
+                    append("Un único candidato: puedes elegir la prueba GATT experimental.");
+                } else append("GATT deshabilitado: no hay un candidato único.");
             }
         }
     }
+
+    private void confirmGatt() {
+        if (running || gattBusy || matching!=1 || candidate==null) return;
+        new AlertDialog.Builder(this)
+            .setTitle("Conexión experimental: posible pérdida de MiniMed Go")
+            .setMessage("SOLO si vas a retirar el sensor antiguo inmediatamente. La conexión puede interrumpir la monitorización. Esta prueba descubre UUID y propiedades GATT; NO lee glucosa ni autentica. No la ejecutes con el sensor nuevo. ¿Continuar?")
+            .setNegativeButton("Cancelar", (d,w)->{})
+            .setPositiveButton("Conectar 20 s", (d,w)->connectGattTest())
+            .show();
+    }
+    private void connectGattTest() {
+        if (running || gattBusy || candidate==null || matching!=1) return;
+        if (Build.VERSION.SDK_INT>=31 &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)!=PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT},101);
+            append("Concede el permiso y vuelve a pulsar explorar GATT.");
+            return;
+        }
+        gattBusy=true;
+        inspect.setEnabled(false);
+        start.setEnabled(false);
+        append("Intentando conexión GATT (20 s máximo). Sin emparejar, leer, escribir ni suscribirse.");
+        handler.postDelayed(gattTimeout,20000);
+        try {
+            activeGatt=candidate.connectGatt(this,false,gattCallback,BluetoothDevice.TRANSPORT_LE);
+            if(activeGatt==null) { append("No se pudo iniciar GATT."); closeGatt(); }
+        } catch (SecurityException | IllegalStateException ex) {
+            append("Error de conexión: "+ex.getClass().getSimpleName());
+            closeGatt();
+        }
+    }
+    private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
+        @Override public void onConnectionStateChange(BluetoothGatt g,int status,int state) {
+            if(!gattBusy) { try { g.close(); } catch(Exception ignored){} return; }
+            if(status!=BluetoothGatt.GATT_SUCCESS || state==BluetoothProfile.STATE_DISCONNECTED) {
+                runOnUiThread(()->{ append("GATT desconectado. Código "+status); closeGatt(); });
+            } else if(state==BluetoothProfile.STATE_CONNECTED) {
+                runOnUiThread(()->append("GATT conectado. Solicitando lista de servicios."));
+                try { if(!g.discoverServices()) runOnUiThread(()->{append("No se pudieron descubrir servicios.");closeGatt();}); }
+                catch(SecurityException ex) { runOnUiThread(()->{append("Permiso GATT denegado.");closeGatt();}); }
+            }
+        }
+        @Override public void onServicesDiscovered(BluetoothGatt g,int status) {
+            runOnUiThread(()->{
+                if(!gattBusy) return;
+                if(status==BluetoothGatt.GATT_SUCCESS) {
+                    int total=0;
+                    for(BluetoothGattService service:g.getServices()) {
+                        append("SERVICIO "+service.getUuid());
+                        for(BluetoothGattCharacteristic ch:service.getCharacteristics()) {
+                            append("  CARACTERÍSTICA "+ch.getUuid()+" propiedades=0x"+
+                                Integer.toHexString(ch.getProperties()));
+                            total++;
+                        }
+                    }
+                    append("Descubrimiento terminado. Características: "+total);
+                } else append("Error descubriendo servicios: "+status);
+                closeGatt();
+            });
+        }
+    };
+    private void closeGatt() {
+        handler.removeCallbacks(gattTimeout);
+        gattBusy=false;
+        BluetoothGatt old=activeGatt;
+        activeGatt=null;
+        if(old!=null) {
+            try { old.disconnect(); } catch(Exception ignored){}
+            try { old.close(); } catch(Exception ignored){}
+        }
+        if(start!=null) start.setEnabled(!running);
+        if(inspect!=null) inspect.setEnabled(false); // one-shot, no repeat connections
+    }
+    private void shareReport() {
+        Intent send=new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT,"Instinct Go BLE/GATT (sin identificadores)");
+        send.putExtra(Intent.EXTRA_TEXT,output.getText().toString());
+        startActivity(Intent.createChooser(send,"Compartir informe"));
+    }
+
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grants) {
         super.onRequestPermissionsResult(requestCode, permissions, grants);
         if (requestCode == REQ_SCAN) {
@@ -174,6 +284,6 @@ public class MainActivity extends Activity {
             else output.setText("Permiso de escaneo denegado.");
         }
     }
-    @Override protected void onPause() { super.onPause(); stopScan(); }
-    @Override protected void onDestroy() { stopScan(); super.onDestroy(); }
+    @Override protected void onPause() { super.onPause(); stopScan(); closeGatt(); }
+    @Override protected void onDestroy() { stopScan(); closeGatt(); super.onDestroy(); }
 }
