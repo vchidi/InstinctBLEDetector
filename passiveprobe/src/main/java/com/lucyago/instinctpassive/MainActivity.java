@@ -252,7 +252,7 @@ public class MainActivity extends Activity {
                         append("SERVICIO "+service.getUuid());
                         for(BluetoothGattCharacteristic ch:service.getCharacteristics()) {
                             characteristics.add(ch.getUuid());
-                            append("  CARACTERÍSTICA "+ch.getUuid()+" propiedades=0x"+
+                            append("  CARACTERÍSTICA "+ch.getUuid()+" ["+Libre3GattFingerprint.describe(ch.getUuid())+"] propiedades=0x"+
                                 Integer.toHexString(ch.getProperties()));
                             total++;
                         }
