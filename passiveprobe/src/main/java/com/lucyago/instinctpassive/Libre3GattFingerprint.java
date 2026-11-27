@@ -43,6 +43,26 @@ public final class Libre3GattFingerprint {
                 ". NO demuestra compatibilidad criptográfica ni identidad Instinct Go.";
         }
     }
+    public static String describe(UUID uuid) {
+        String suffix="-ef89-11e9-81b4-2a2ae2dbcce4";
+        String value=uuid.toString();
+        if(!value.endsWith(suffix)) return "Sin clasificar";
+        switch(value.substring(0,8)) {
+            case "089810cc": return "Servicio de datos Libre 3";
+            case "0898203a": return "Servicio de seguridad Libre 3";
+            case "08981338": return "Control";
+            case "08981482": return "Estado del sensor";
+            case "08981bee": return "Registro de eventos";
+            case "0898177a": return "Glucosa actual";
+            case "0898195a": return "Histórico de glucosa";
+            case "08981ab8": return "Datos clínicos";
+            case "08981d24": return "Datos de fábrica";
+            case "08982198": return "Comando/respuesta de seguridad";
+            case "089822ce": return "Reto de seguridad";
+            case "089823fa": return "Certificados";
+            default: return "UUID no clasificado";
+        }
+    }
     private Libre3GattFingerprint() {}
     public static Result inspect(Collection<UUID> serviceUuids,Collection<UUID> characteristicUuids) {
         if(serviceUuids==null || characteristicUuids==null)
