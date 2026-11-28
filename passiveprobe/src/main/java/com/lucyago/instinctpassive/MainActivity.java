@@ -41,6 +41,9 @@ public class MainActivity extends Activity {
     private Button share;
     private BluetoothDevice candidate;
     private long lastConnectableMs;
+    private long minGap=Long.MAX_VALUE,maxGap=0;
+    private boolean waitingFresh;
+    private final Runnable freshTimeout=()->{ append("Sin anuncio nuevo en 90 s."); cancelFresh(); };
     private int connectablePackets;
     private long connectionStartMs;
     private BluetoothGatt activeGatt;
@@ -73,7 +76,7 @@ public class MainActivity extends Activity {
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(28, 32, 28, 24);
         TextView title = new TextView(this);
-        title.setText("Instinct Go — diagnóstico GATT 133 v2");
+        title.setText("Instinct Go — diagnóstico GATT 133 v3");
         title.setTextSize(21);
         layout.addView(title);
         TextView description = new TextView(this);
@@ -103,7 +106,7 @@ public class MainActivity extends Activity {
         output.append("\n" + message);
     }
     private void begin() {
-        if (running || gattBusy) return;
+        if (running || gattBusy || waitingFresh) return;
         BluetoothManager manager = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
         BluetoothAdapter adapter = manager == null ? null : manager.getAdapter();
         if (adapter == null || !adapter.isEnabled()) {
@@ -121,7 +124,7 @@ public class MainActivity extends Activity {
         }
         scanner = adapter.getBluetoothLeScanner();
         if (scanner == null) { output.setText("No se puede iniciar el escáner BLE."); return; }
-        candidate=null; lastConnectableMs=0; connectablePackets=0; inspect.setEnabled(false);
+        candidate=null; lastConnectableMs=0; connectablePackets=0; minGap=Long.MAX_VALUE; maxGap=0; inspect.setEnabled(false);
         seen.clear(); count=0; matching=0; compatiblePackets=0;
         minRssi=127; maxRssi=-127; sumRssi=0; sampleCount=0;
         manufacturerIds.clear(); serviceDataShapes.clear();
@@ -148,7 +151,7 @@ public class MainActivity extends Activity {
         String key = r.getDevice().getAddress();
         if (match) {
             compatiblePackets++;
-            if(r.isConnectable()) { connectablePackets++; lastConnectableMs=android.os.SystemClock.elapsedRealtime(); }
+            if(r.isConnectable()) { long now=r.getTimestampNanos()/1000000L; if(lastConnectableMs>0 && now>=lastConnectableMs){long gap=now-lastConnectableMs; minGap=Math.min(minGap,gap); maxGap=Math.max(maxGap,gap);} connectablePackets++; lastConnectableMs=now; }
             int rssi=r.getRssi();
             minRssi=Math.min(minRssi,rssi);
             maxRssi=Math.max(maxRssi,rssi);
@@ -195,6 +198,7 @@ public class MainActivity extends Activity {
                     (serviceDataShapes.isEmpty() ? "ninguna" : serviceDataShapes.toString()));
                 append("No se guardan direcciones MAC, datos binarios ni identificadores privados.");
                 append("Anuncios conectables: "+connectablePackets+" de "+compatiblePackets);
+                if(minGap!=Long.MAX_VALUE) append("Intervalos entre anuncios (ms): mínimo "+minGap+", máximo "+maxGap);
                 if(matching==1 && candidate!=null && !gattAttempted && connectablePackets>0) {
                     inspect.setEnabled(true);
                     append("Un único candidato: puedes elegir la prueba GATT experimental.");
@@ -209,20 +213,50 @@ public class MainActivity extends Activity {
             .setTitle("Conexión experimental: posible pérdida de MiniMed Go")
             .setMessage("SOLO con sensor antiguo retirado y aislado físicamente del sensor activo. La conexión puede interrumpir la monitorización. Esta prueba descubre UUID y propiedades GATT; NO lee glucosa ni autentica. No la ejecutes con el sensor nuevo. ¿Continuar?")
             .setNegativeButton("Cancelar", (d,w)->{})
-            .setPositiveButton("Conectar 20 s", (d,w)->connectGattTest())
+            .setPositiveButton("Esperar anuncio nuevo", (d,w)->connectGattTest())
             .show();
     }
     private void connectGattTest() {
         if (running || gattBusy || gattAttempted || candidate==null || matching!=1 || connectablePackets==0) return;
-        long age=android.os.SystemClock.elapsedRealtime()-lastConnectableMs;
-        append("Edad del último anuncio conectable: "+age+" ms.");
-        if(age>15000) { append("Anuncio demasiado antiguo. Repite el escaneo pasivo."); inspect.setEnabled(false); return; }
         if (Build.VERSION.SDK_INT>=31 &&
             checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)!=PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT},101);
             append("Concede el permiso y vuelve a pulsar explorar GATT.");
             return;
         }
+        waitingFresh=true;
+        inspect.setEnabled(false); start.setEnabled(false);
+        append("Esperando anuncio nuevo del mismo candidato (90 s máximo).");
+        try {
+            scanner.startScan(null,new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(),freshCallback);
+            handler.postDelayed(freshTimeout,90000);
+        } catch(SecurityException | IllegalStateException ex) { append("Error al esperar anuncio: "+ex.getClass().getSimpleName()); cancelFresh(); }
+    }
+    private final ScanCallback freshCallback=new ScanCallback(){
+        @Override public void onScanResult(int type,ScanResult r){ handler.post(()->freshResult(r)); }
+        @Override public void onScanFailed(int code){handler.post(()->{if(waitingFresh){append("Error de escaneo nuevo: "+code);cancelFresh();}});}
+    };
+    private void cancelFresh(){
+        handler.removeCallbacks(freshTimeout);
+        if(waitingFresh){waitingFresh=false;try{scanner.stopScan(freshCallback);}catch(Exception ignored){}}
+        start.setEnabled(!running && !gattBusy);
+        inspect.setEnabled(false);
+    }
+    private void freshResult(ScanResult r){
+        if(!waitingFresh || r.getScanRecord()==null || r.getScanRecord().getServiceUuids()==null) return;
+        boolean match=false;
+        for(android.os.ParcelUuid u:r.getScanRecord().getServiceUuids()) if(UUID.fromString(LIBRE3_SERVICE).equals(u.getUuid())) match=true;
+        if(!match) return;
+        if(!r.getDevice().equals(candidate)){append("Candidato distinto: prueba cancelada.");cancelFresh();return;}
+        if(!r.isConnectable()) return;
+        long age=android.os.SystemClock.elapsedRealtime()-r.getTimestampNanos()/1000000L;
+        if(age<0 || age>2000) return;
+        append("Anuncio nuevo: edad "+age+" ms, RSSI "+r.getRssi()+" dBm.");
+        cancelFresh();
+        candidate=r.getDevice();
+        openGatt();
+    }
+    private void openGatt(){
         connectionStartMs=android.os.SystemClock.elapsedRealtime();
         gattAttempted=true;
         gattBusy=true;
@@ -303,7 +337,7 @@ public class MainActivity extends Activity {
             else output.setText("Permiso de escaneo denegado.");
         }
     }
-    @Override protected void onPause() { super.onPause(); stopScan(); closeGatt(); }
-    @Override public void onBackPressed() { closeGatt(); super.onBackPressed(); }
-    @Override protected void onDestroy() { stopScan(); closeGatt(); super.onDestroy(); }
+    @Override protected void onPause() { super.onPause(); cancelFresh(); stopScan(); closeGatt(); }
+    @Override public void onBackPressed() { cancelFresh(); closeGatt(); super.onBackPressed(); }
+    @Override protected void onDestroy() { cancelFresh(); stopScan(); closeGatt(); super.onDestroy(); }
 }
