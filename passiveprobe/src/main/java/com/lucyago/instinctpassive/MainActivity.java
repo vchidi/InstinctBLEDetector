@@ -48,6 +48,7 @@ public class MainActivity extends Activity {
     private long connectionStartMs;
     private BluetoothGatt activeGatt;
     private final java.util.ArrayDeque<BluetoothGattCharacteristic> metadataQueue=new java.util.ArrayDeque<>();
+    private BluetoothGattCharacteristic pendingRead;
     private boolean gattBusy;
     private boolean gattAttempted;
     private final Runnable gattTimeout = () -> { append("Tiempo límite GATT (20 s)."); closeGatt(); };
@@ -77,7 +78,7 @@ public class MainActivity extends Activity {
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(28, 32, 28, 24);
         TextView title = new TextView(this);
-        title.setText("Instinct Go — laboratorio sensor retirado v4");
+        title.setText("Instinct Go — laboratorio sensor retirado v5");
         title.setTextSize(21);
         layout.addView(title);
         TextView description = new TextView(this);
@@ -87,7 +88,7 @@ public class MainActivity extends Activity {
         start.setText("Escanear 90 segundos");
         layout.addView(start);
         inspect = new Button(this);
-        inspect.setText("2. Explorar GATT (riesgo, solo antes del cambio)");
+        inspect.setText("2. Explorar GATT (solo sensor retirado y aislado)");
         inspect.setEnabled(false);
         layout.addView(inspect);
         share = new Button(this);
@@ -197,7 +198,7 @@ public class MainActivity extends Activity {
                     (manufacturerIds.isEmpty() ? "ninguno" : manufacturerIds.toString()));
                 append("Longitudes de datos de servicio: " +
                     (serviceDataShapes.isEmpty() ? "ninguna" : serviceDataShapes.toString()));
-                append("No se guardan direcciones MAC, datos binarios ni identificadores privados.");
+                append("Escaneo: no se guardan MAC ni datos binarios de anuncios.");
                 append("Anuncios conectables: "+connectablePackets+" de "+compatiblePackets);
                 if(minGap!=Long.MAX_VALUE) append("Intervalos entre anuncios (ms): mínimo "+minGap+", máximo "+maxGap);
                 if(matching==1 && candidate!=null && !gattAttempted && connectablePackets>0) {
@@ -212,7 +213,7 @@ public class MainActivity extends Activity {
         if (running || gattBusy || gattAttempted || matching!=1 || candidate==null) return;
         new AlertDialog.Builder(this)
             .setTitle("Conexión experimental: posible pérdida de MiniMed Go")
-            .setMessage("SOLO con sensor antiguo retirado y aislado físicamente del sensor activo. La conexión puede interrumpir la monitorización. Esta prueba descubre UUID y lee metadatos estándar; NO lee glucosa ni autentica. No la ejecutes con el sensor nuevo. ¿Continuar?")
+            .setMessage("SOLO con sensor antiguo retirado y aislado físicamente del sensor activo. La conexión puede interrumpir la monitorización. Esta prueba descubre UUID y lee metadatos estándar y estado; NO lee glucosa ni autentica. No la ejecutes con el sensor nuevo. ¿Continuar?")
             .setNegativeButton("Cancelar", (d,w)->{})
             .setPositiveButton("Esperar anuncio nuevo", (d,w)->connectGattTest())
             .show();
@@ -263,7 +264,7 @@ public class MainActivity extends Activity {
         gattBusy=true;
         inspect.setEnabled(false);
         start.setEnabled(false);
-        append("Intentando conexión GATT (20 s máximo). Sin emparejar, escribir ni suscribirse. Lectura limitada a metadatos estándar.");
+        append("Intentando conexión GATT (20 s máximo). Sin emparejar, escribir ni suscribirse. Lectura limitada a metadatos estándar y estado.");
         handler.postDelayed(gattTimeout,20000);
         try {
             activeGatt=candidate.connectGatt(this,false,gattCallback,BluetoothDevice.TRANSPORT_LE);
@@ -287,7 +288,7 @@ public class MainActivity extends Activity {
                 }
             });
         }
-        @Override public void onCharacteristicRead(BluetoothGatt g,BluetoothGattCharacteristic ch,byte[] value,int status){metadataResult(g,ch,value.clone(),status);}
+        @Override public void onCharacteristicRead(BluetoothGatt g,BluetoothGattCharacteristic ch,byte[] value,int status){metadataResult(g,ch,value==null?null:value.clone(),status);}
         @Override public void onCharacteristicRead(BluetoothGatt g,BluetoothGattCharacteristic ch,int status){byte[] v=ch.getValue();metadataResult(g,ch,v==null?null:v.clone(),status);}
         @Override public void onServicesDiscovered(BluetoothGatt g,int status) {
             runOnUiThread(()->{
@@ -303,6 +304,8 @@ public class MainActivity extends Activity {
                             characteristics.add(ch.getUuid());
                             append("  CARACTERÍSTICA "+ch.getUuid()+" ["+Libre3GattFingerprint.describe(ch.getUuid())+"] propiedades=0x"+
                                 Integer.toHexString(ch.getProperties()));
+                            for(android.bluetooth.BluetoothGattDescriptor d:ch.getDescriptors()) append("    DESCRIPTOR "+d.getUuid()+" permisos=0x"+Integer.toHexString(d.getPermissions()));
+                            append("    Permisos declarados=0x"+Integer.toHexString(ch.getPermissions()));
                             total++;
                         }
                     }
@@ -318,10 +321,10 @@ public class MainActivity extends Activity {
         metadataQueue.clear();
         for(BluetoothGattService service:g.getServices()){
             String serviceId=service.getUuid().toString();
-            if(!serviceId.startsWith("00001800-") && !serviceId.startsWith("0000180a-")) continue;
+            if(!serviceId.startsWith("00001800-") && !serviceId.startsWith("0000180a-") && !serviceId.equals(LIBRE3_SERVICE)) continue;
             for(BluetoothGattCharacteristic ch:service.getCharacteristics()){
                 String id=ch.getUuid().toString();
-                if((id.startsWith("00002a00-") || id.startsWith("00002a28-") || id.startsWith("00002a29-") || id.startsWith("00002a24-") || id.startsWith("00002a26-")) && (ch.getProperties() & BluetoothGattCharacteristic.PROPERTY_READ)!=0) metadataQueue.add(ch);
+                if((id.equals("08981482-ef89-11e9-81b4-2a2ae2dbcce4") || id.startsWith("00002a00-") || id.startsWith("00002a28-") || id.startsWith("00002a29-") || id.startsWith("00002a24-") || id.startsWith("00002a26-")) && (ch.getProperties() & BluetoothGattCharacteristic.PROPERTY_READ)!=0) metadataQueue.add(ch);
             }
         }
         nextMetadata(g);
@@ -329,24 +332,33 @@ public class MainActivity extends Activity {
     private void nextMetadata(BluetoothGatt g){
         if(!gattBusy || g!=activeGatt) return;
         BluetoothGattCharacteristic ch=metadataQueue.poll();
-        if(ch==null){append("Lectura de metadatos terminada. Sin autenticación ni escrituras.");closeGatt();return;}
+        if(ch==null){append("Lecturas terminadas. Sin autenticación ni escrituras. No interpretar como glucosa.");closeGatt();return;}
+        pendingRead=ch;
+        append("Solicitando lectura "+ch.getUuid());
         try{if(!g.readCharacteristic(ch)){append("Lectura no iniciada: "+ch.getUuid());nextMetadata(g);}}
         catch(SecurityException ex){append("Permiso de lectura denegado.");closeGatt();}
     }
     private void metadataResult(BluetoothGatt g,BluetoothGattCharacteristic ch,byte[] value,int status){
         handler.post(()->{
             if(!gattBusy || g!=activeGatt) return;
+            if(pendingRead!=ch) return;
+            pendingRead=null;
             String id=ch.getUuid().toString();
             if(status==0 && value!=null){
                 String v=new String(value,java.nio.charset.StandardCharsets.UTF_8).replaceAll("[^\\p{Print}]","?");
                 // Device name may contain a serial number: do not export its value.
                 append("METADATO "+id+": "+(id.startsWith("00002a00-")?"nombre presente ("+value.length+" bytes)":v.substring(0,Math.min(v.length(),120))));
+                if(id.startsWith("00002a28-") || id.equals("08981482-ef89-11e9-81b4-2a2ae2dbcce4")){
+                    StringBuilder hex=new StringBuilder();
+                    for(int i=0;i<Math.min(value.length,128);i++) hex.append(String.format(java.util.Locale.ROOT,"%02X ",value[i]&255));
+                    append("BINARIO "+id+" longitud="+value.length+" hex="+hex+(value.length>128?" (truncado)":""));
+                }
             }else append("METADATO "+id+" error "+status);
             nextMetadata(g);
         });
     }
     private void closeGatt() {
-        metadataQueue.clear();
+        metadataQueue.clear(); pendingRead=null;
         handler.removeCallbacks(gattTimeout);
         gattBusy=false;
         BluetoothGatt old=activeGatt;
